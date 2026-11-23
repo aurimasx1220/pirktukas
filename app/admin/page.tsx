@@ -87,6 +87,8 @@ export default function AdminPage() {
   const [unit, setUnit] = useState("vnt");
   const [brand, setBrand] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
+  const [labelStoreName, setLabelStoreName] = useState("Maxima");
+  const [scanningLabel, setScanningLabel] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -331,6 +333,69 @@ export default function AdminPage() {
     setAdminPassword(value);
   }
 
+  async function scanLabel(file: File | null) {
+    if (!file) return;
+    if (!adminPassword) {
+      setMessage({ type: "error", text: "Įveskite administratoriaus slaptažodį." });
+      return;
+    }
+
+    setScanningLabel(true);
+    setMessage(null);
+
+    const formData = new FormData();
+    formData.append("image", file);
+    formData.append("storeName", labelStoreName);
+
+    const response = await fetch("/api/parse-label", {
+      method: "POST",
+      headers: { "x-admin-password": adminPassword },
+      body: formData,
+    });
+
+    const result = await response.json().catch(() => ({ message: "Nepavyko apdoroti serverio atsakymo." })) as {
+      message?: string;
+      name?: string;
+      brand?: string;
+      quantity?: number;
+      unit?: "g" | "kg" | "ml" | "l" | "vnt";
+      regular_price?: number;
+      promo_price?: number | null;
+      price_type?: "regular" | "promo" | "loyalty_card";
+    };
+
+    if (!response.ok) {
+      setMessage({ type: "error", text: result.message ?? "Nepavyko nuskaityti kainos etiketės." });
+      setScanningLabel(false);
+      return;
+    }
+
+    if (typeof result.name === "string") setName(result.name);
+    if (typeof result.brand === "string") setBrand(result.brand);
+    if (typeof result.quantity === "number" && result.quantity > 0) setQuantity(String(result.quantity));
+    if (result.unit) setUnit(result.unit);
+
+    if (typeof result.regular_price === "number") {
+      setStoreDrafts((drafts) => drafts.map((draft) => {
+        if (draft.name !== labelStoreName) return draft;
+        const priceType = result.price_type === "loyalty_card"
+          ? "loyalty_card"
+          : result.price_type === "promo"
+            ? "promo_all"
+            : "regular";
+        return {
+          ...draft,
+          regular: String(result.regular_price),
+          promo: typeof result.promo_price === "number" ? String(result.promo_price) : "",
+          priceType,
+        };
+      }));
+    }
+
+    setMessage({ type: "success", text: "Duomenys nuskaityti – patikrinkite ir paspauskite Išsaugoti" });
+    setScanningLabel(false);
+  }
+
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!adminPassword) return;
@@ -401,6 +466,24 @@ export default function AdminPage() {
           {message.text}
         </div>
       ) : null}
+
+      <section className="rounded-3xl border border-line bg-card p-5 shadow-[0_12px_32px_rgba(28,25,21,0.04)] sm:p-7">
+        <h2 className="font-display text-2xl tracking-tight">Nuskaityti kainos etiketę iš nuotraukos</h2>
+        <div className="mt-4 grid gap-4 sm:grid-cols-[14rem_1fr] sm:items-end">
+          <label className="flex flex-col gap-1 text-sm font-semibold text-ink-soft">
+            Parduotuvė
+            <select value={labelStoreName} onChange={(event) => setLabelStoreName(event.target.value)} className="input">
+              <option value="Maxima">Maxima</option>
+              <option value="Rimi">Rimi</option>
+              <option value="IKI">IKI</option>
+            </select>
+          </label>
+          <label className="flex h-12 cursor-pointer items-center justify-center rounded-xl border border-forest/20 bg-forest/5 px-4 text-sm font-semibold text-forest">
+            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={scanningLabel} onChange={(event) => void scanLabel(event.target.files?.[0] ?? null)} />
+            {scanningLabel ? "Nuskaitoma..." : "Pasirinkti nuotrauką / fotografuoti"}
+          </label>
+        </div>
+      </section>
 
       <section className="rounded-3xl border border-line bg-card p-5 shadow-[0_12px_32px_rgba(28,25,21,0.04)] sm:p-7">
         <h2 className="font-display text-3xl tracking-tight">Pridėti naują produktą ir kainas</h2>
