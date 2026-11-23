@@ -14,6 +14,16 @@ type StoreDraft = {
   promo: string;
   priceType: "regular" | "promo_all" | "loyalty_card" | "multi_buy";
 };
+type ScannedItem = {
+  selected: boolean;
+  name: string;
+  brand: string;
+  quantity: number;
+  unit: "g" | "kg" | "ml" | "l" | "vnt";
+  regular_price: number;
+  promo_price: number | null;
+  price_type: "regular" | "promo" | "loyalty_card";
+};
 type ExistingProduct = {
   id: string;
   name: string;
@@ -87,8 +97,9 @@ export default function AdminPage() {
   const [unit, setUnit] = useState("vnt");
   const [brand, setBrand] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
-  const [labelStoreName, setLabelStoreName] = useState("Maxima");
+  const [labelStoreName, setLabelStoreName] = useState("");
   const [scanningLabel, setScanningLabel] = useState(false);
+  const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -144,6 +155,9 @@ export default function AdminPage() {
     })).filter((store) => store.storeId));
 
     if (!categoryId && categoryRows.length > 0) setCategoryId(id(categoryRows[0]) ?? "");
+    if (storeRows.length > 0) {
+      setLabelStoreName((current) => current || text(storeRows[0], "name") || "");
+    }
     setLoading(false);
   }
 
@@ -355,6 +369,7 @@ export default function AdminPage() {
 
     const result = await response.json().catch(() => ({ message: "Nepavyko apdoroti serverio atsakymo." })) as {
       message?: string;
+      items?: ScannedItem[];
       name?: string;
       brand?: string;
       quantity?: number;
@@ -370,26 +385,43 @@ export default function AdminPage() {
       return;
     }
 
-    if (typeof result.name === "string") setName(result.name);
-    if (typeof result.brand === "string") setBrand(result.brand);
-    if (typeof result.quantity === "number" && result.quantity > 0) setQuantity(String(result.quantity));
-    if (result.unit) setUnit(result.unit);
+    const items = Array.isArray(result.items)
+      ? result.items
+      : typeof result.name === "string"
+        ? [{ selected: true, name: result.name, brand: result.brand ?? "", quantity: result.quantity ?? 0, unit: result.unit ?? "vnt", regular_price: result.regular_price ?? 0, promo_price: result.promo_price ?? null, price_type: result.price_type ?? "regular" }]
+        : [];
 
-    if (typeof result.regular_price === "number") {
-      setStoreDrafts((drafts) => drafts.map((draft) => {
-        if (draft.name !== labelStoreName) return draft;
-        const priceType = result.price_type === "loyalty_card"
-          ? "loyalty_card"
-          : result.price_type === "promo"
-            ? "promo_all"
-            : "regular";
-        return {
-          ...draft,
-          regular: String(result.regular_price),
-          promo: typeof result.promo_price === "number" ? String(result.promo_price) : "",
-          priceType,
-        };
-      }));
+    if (items.length > 1) {
+      setScannedItems(items.map((item) => ({ ...item, selected: true })));
+      setMessage({ type: "success", text: `Nuskaityta ${items.length} prekės – patikrinkite pažymėtas prekes.` });
+      setScanningLabel(false);
+      return;
+    }
+
+    const oneItem = items[0];
+    setScannedItems([]);
+    if (oneItem) {
+      setName(oneItem.name);
+      setBrand(oneItem.brand);
+      if (oneItem.quantity > 0) setQuantity(String(oneItem.quantity));
+      setUnit(oneItem.unit);
+
+      if (oneItem.regular_price >= 0) {
+        setStoreDrafts((drafts) => drafts.map((draft) => {
+          if (draft.name !== labelStoreName) return draft;
+          const priceType = oneItem.price_type === "loyalty_card"
+            ? "loyalty_card"
+            : oneItem.price_type === "promo"
+              ? "promo_all"
+              : "regular";
+          return {
+            ...draft,
+            regular: String(oneItem.regular_price),
+            promo: typeof oneItem.promo_price === "number" ? String(oneItem.promo_price) : "",
+            priceType,
+          };
+        }));
+      }
     }
 
     setMessage({ type: "success", text: "Duomenys nuskaityti – patikrinkite ir paspauskite Išsaugoti" });
@@ -427,6 +459,49 @@ export default function AdminPage() {
     setAdminPassword("");
     window.sessionStorage.removeItem("pirktukas-admin-password");
     window.sessionStorage.removeItem("pirktukas-admin-auth");
+  }
+
+  async function saveScannedItems() {
+    const selectedItems = scannedItems.filter((item) => item.selected);
+    if (selectedItems.length === 0) {
+      setMessage({ type: "error", text: "Pažymėkite bent vieną nuskaitytą prekę." });
+      return;
+    }
+
+    const selectedStore = stores.find((store) => text(store, "name") === labelStoreName);
+    const storeId = selectedStore ? id(selectedStore) : null;
+    if (!storeId || !categoryId) {
+      setMessage({ type: "error", text: "Pasirinkite kategoriją ir parduotuvę." });
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+
+    for (const item of selectedItems) {
+      const priceType = item.price_type === "loyalty_card" ? "loyalty_card" : item.price_type === "promo" ? "promo_all" : "regular";
+      const response = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-password": adminPassword },
+        body: JSON.stringify({
+          action: "createProduct",
+          password: adminPassword,
+          product: { name: item.name, categoryId, quantity: item.quantity, unit: item.unit, brand: item.brand },
+          stores: [{ storeId, regular: item.regular_price, promo: item.promo_price, priceType }],
+        }),
+      });
+      const result = await response.json().catch(() => ({ message: "Nepavyko apdoroti serverio atsakymo." })) as { message?: string };
+      if (!response.ok) {
+        setMessage({ type: "error", text: result.message ?? `Nepavyko išsaugoti prekės „${item.name}“.` });
+        setSaving(false);
+        return;
+      }
+    }
+
+    setMessage({ type: "success", text: `Išsaugota pažymėtų prekių: ${selectedItems.length}.` });
+    setScannedItems([]);
+    await loadAdminData();
+    setSaving(false);
   }
 
   return (
@@ -473,9 +548,10 @@ export default function AdminPage() {
           <label className="flex flex-col gap-1 text-sm font-semibold text-ink-soft">
             Parduotuvė
             <select value={labelStoreName} onChange={(event) => setLabelStoreName(event.target.value)} className="input">
-              <option value="Maxima">Maxima</option>
-              <option value="Rimi">Rimi</option>
-              <option value="IKI">IKI</option>
+              {stores.map((store) => {
+                const storeName = text(store, "name") ?? "Parduotuvė";
+                return <option key={id(store) ?? storeName} value={storeName}>{storeName}</option>;
+              })}
             </select>
           </label>
           <label className="flex h-12 cursor-pointer items-center justify-center rounded-xl border border-forest/20 bg-forest/5 px-4 text-sm font-semibold text-forest">
@@ -557,6 +633,35 @@ export default function AdminPage() {
           </div>
         )}
       </section>
+
+      {scannedItems.length > 0 ? (
+        <section className="rounded-3xl border border-line bg-card p-5 sm:p-7">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-2xl tracking-tight">Nuskaitytos prekės</h2>
+            <span className="text-sm font-semibold text-forest">Pažymėta: {scannedItems.filter((item) => item.selected).length}</span>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {scannedItems.map((item, index) => (
+              <article key={`${item.name}-${index}`} className="rounded-2xl border border-line bg-background p-4">
+                <div className="flex items-start gap-3">
+                  <input type="checkbox" checked={item.selected} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, selected: event.target.checked } : entry))} className="mt-1 size-5" />
+                  <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
+                    <Field label="Prekės pavadinimas"><input value={item.name} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, name: event.target.value } : entry))} className="input" /></Field>
+                    <Field label="Gamintojas"><input value={item.brand} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, brand: event.target.value } : entry))} className="input" /></Field>
+                    <Field label="Kiekis"><input inputMode="decimal" value={item.quantity || ""} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, quantity: Number(event.target.value.replace(",", ".")) } : entry))} className="input" /></Field>
+                    <Field label="Vienetas"><select value={item.unit} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, unit: event.target.value as ScannedItem["unit"] } : entry))} className="input">{["g", "kg", "ml", "l", "vnt"].map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select></Field>
+                    <Field label="Įprasta kaina"><input inputMode="decimal" value={item.regular_price || ""} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, regular_price: Number(event.target.value.replace(",", ".")) } : entry))} className="input" /></Field>
+                    <Field label="Akcijos kaina"><input inputMode="decimal" value={item.promo_price ?? ""} onChange={(event) => setScannedItems((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, promo_price: event.target.value ? Number(event.target.value.replace(",", ".")) : null } : entry))} className="input" /></Field>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+          <button type="button" disabled={saving} onClick={() => void saveScannedItems()} className="mt-4 h-12 w-full rounded-xl bg-forest px-5 text-sm font-semibold text-white disabled:opacity-60">
+            {saving ? "Saugoma..." : "Išsaugoti pažymėtas prekes"}
+          </button>
+        </section>
+      ) : null}
 
       <details className="rounded-2xl border border-line bg-card p-5">
         <summary className="cursor-pointer font-semibold text-forest">Supabase SQL teisėms suteikti</summary>

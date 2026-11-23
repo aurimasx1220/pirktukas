@@ -79,18 +79,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Nuotrauka nepateikta" }, { status: 400 });
   }
 
-  const prompt = `Išanalizuok šioje parduotuvės kainos etiketės nuotraukoje pateiktą informaciją. ${storeName ? `Parduotuvė: ${storeName}.` : ""} Atsakyk tik JSON objektu lietuviškais laukais ir reikšmėmis.
+  const prompt = `Išanalizuok šią parduotuvių kainų etiketę, kainų leidinį arba kelių akcijų nuotrauką. ${storeName ? `Parduotuvė: ${storeName}.` : ""} Rask visas atskiras prekes ir grąžink tik JSON objektą lietuviškais laukais.
 
-Reikalingos reikšmės:
+Grąžink struktūrą: { "items": [ { "name", "brand", "quantity", "unit", "regular_price", "promo_price", "price_type" } ] }
+
+Kiekvienam elementui:
 - name: prekės pavadinimas lietuviškai
 - brand: prekės ženklas arba tuščia eilutė
 - quantity: skaičius be matavimo vieneto
 - unit: g, kg, ml, l arba vnt
-- regular_price: įprasta kaina kaip skaičius, eurais
+- regular_price: įprasta kaina eurais kaip skaičius
 - promo_price: akcijos kaina kaip skaičius arba null
-- price_type: regular, promo arba loyalty_card; naudok loyalty_card, jei matoma kortelės sąlyga (Ačiū, Mano Rimi, IKI kortelė, su kortele ir pan.)
+- price_type: regular, promo arba loyalty_card
 
-Jei akcijos kainos nėra, promo_price turi būti null, o price_type turi būti regular arba loyalty_card. Jei kainos nepavyksta tiksliai perskaityti, quantity ir kainas naudok kaip 0 arba null.`;
+Jei nuotraukoje yra viena etiketė, items turi turėti vieną elementą. Jei yra kelių prekių leidinys, items turi apimti visas aiškiai matomas kainas. Jei kainos tiksliai neįskaitomos, quantity ir kainas nustatyk į 0 arba null.`;
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
   const geminiResponse = await fetch(endpoint, {
@@ -131,20 +133,27 @@ Jei akcijos kainos nėra, promo_price turi būti null, o price_type turi būti r
     return NextResponse.json({ message: "Nepavyko apdoroti Gemini atsakymo" }, { status: 502 });
   }
 
-  const quantity = numberValue(parsed.quantity);
-  const regularPrice = numberValue(parsed.regular_price);
-  const promoPrice = numberValue(parsed.promo_price);
-  const priceTypeValue = typeof parsed.price_type === "string" ? parsed.price_type : "regular";
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  if (items.length === 0) {
+    return NextResponse.json({ message: "Nerasta jokių prekių" }, { status: 502 });
+  }
 
-  const output: ParsedLabel = {
-    name: typeof parsed.name === "string" ? parsed.name.trim() : "",
-    brand: typeof parsed.brand === "string" ? parsed.brand.trim() : "",
-    quantity: quantity !== null && quantity > 0 ? quantity : 0,
-    unit: normalizeUnit(parsed.unit),
-    regular_price: regularPrice !== null && regularPrice >= 0 ? regularPrice : 0,
-    promo_price: promoPrice !== null && promoPrice >= 0 ? promoPrice : null,
-    price_type: priceTypeValue === "loyalty_card" ? "loyalty_card" : promoPrice !== null ? "promo" : "regular",
-  };
+  const output = items.map((item) => {
+    const quantity = numberValue(item.quantity);
+    const regularPrice = numberValue(item.regular_price);
+    const promoPrice = numberValue(item.promo_price);
+    const priceTypeValue = typeof item.price_type === "string" ? item.price_type : "regular";
 
-  return NextResponse.json(output);
+    return {
+      name: typeof item.name === "string" ? item.name.trim() : "",
+      brand: typeof item.brand === "string" ? item.brand.trim() : "",
+      quantity: quantity !== null && quantity > 0 ? quantity : 0,
+      unit: normalizeUnit(item.unit),
+      regular_price: regularPrice !== null && regularPrice >= 0 ? regularPrice : 0,
+      promo_price: promoPrice !== null && promoPrice >= 0 ? promoPrice : null,
+      price_type: priceTypeValue === "loyalty_card" ? "loyalty_card" : promoPrice !== null ? "promo" : "regular",
+    };
+  });
+
+  return NextResponse.json({ items: output });
 }

@@ -62,16 +62,38 @@ function LoyaltyBadge() {
 type CartItem = { productId: string; quantity: number };
 
 const CART_STORAGE_KEY = "pirktukas-cart-v1";
+const CHECKED_STORAGE_KEY = "pirktukas-cart-picked-v1";
+const STORE_FILTER_STORAGE_KEY = "pirktukas-store-filter-v1";
 
 export function CatalogView({ catalog }: { catalog: Catalog }) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [cartLoaded, setCartLoaded] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
+  const [selectedStore, setSelectedStore] = useState("Visos");
+  const allProductsForStores = useMemo(
+    () => catalog.sections.flatMap((section) => section.products),
+    [catalog.sections],
+  );
+  const storeOptions = ["Visos", ...Array.from(new Set(allProductsForStores.flatMap((product) => product.offers.map((offer) => offer.storeName))))];
 
   useEffect(() => {
     try {
+      const savedStore = window.localStorage.getItem(STORE_FILTER_STORAGE_KEY);
+      if (savedStore && ["Visos", "Lidl", "Norfa", "Maxima", "Rimi", "IKI"].includes(savedStore)) {
+        if (savedStore === "Visos" || allProductsForStores.some((product) => product.offers.some((offer) => offer.storeName === savedStore))) {
+          setSelectedStore(savedStore);
+        }
+      }
+
+      const savedPicked = window.localStorage.getItem(CHECKED_STORAGE_KEY);
+      if (savedPicked) {
+        const parsedPicked = JSON.parse(savedPicked);
+        if (Array.isArray(parsedPicked)) setPickedIds(parsedPicked.filter((id): id is string => typeof id === "string"));
+      }
+
       const saved = window.localStorage.getItem(CART_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -89,8 +111,12 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
   }, []);
 
   useEffect(() => {
-    if (cartLoaded) window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
-  }, [cart, cartLoaded]);
+    if (cartLoaded) {
+      window.localStorage.setItem(STORE_FILTER_STORAGE_KEY, selectedStore);
+      window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
+      window.localStorage.setItem(CHECKED_STORAGE_KEY, JSON.stringify(pickedIds.filter((id) => cart.some((item) => item.productId === id))));
+    }
+  }, [cart, pickedIds, cartLoaded, selectedStore]);
 
   const visibleSections = useMemo(() => {
     const search = normalizeText(query.trim());
@@ -147,6 +173,10 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
           allProducts={allProducts}
           onClose={() => setCartOpen(false)}
           onSetQuantity={setCartQuantity}
+          pickedIds={pickedIds}
+          onTogglePicked={(productId) => setPickedIds((current) => current.includes(productId) ? current.filter((id) => id !== productId) : [...current, productId])}
+          onClear={() => { setCart([]); setPickedIds([]); }}
+          selectedStore={selectedStore}
         />
       ) : null}
       <div className="rounded-3xl border border-line bg-card p-4 shadow-[0_12px_32px_rgba(28,25,21,0.04)] sm:p-5">
@@ -179,6 +209,17 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
             <span className="hidden sm:inline">Krepšelis</span>
             <span className="flex size-6 items-center justify-center rounded-full bg-white text-xs font-bold text-forest tabular-nums">{cartCount}</span>
           </button>
+        </div>
+
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Parduotuvės filtras">
+          {storeOptions.map((storeName) => (
+            <CategoryButton
+              key={storeName}
+              active={selectedStore === storeName}
+              onClick={() => setSelectedStore(storeName)}
+              label={storeName}
+            />
+          ))}
         </div>
 
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Kategorijų filtras">
@@ -223,6 +264,7 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
                     product={product}
                     cartQuantity={cart.find((item) => item.productId === product.id)?.quantity ?? 0}
                     onSetCartQuantity={(quantity) => setCartQuantity(product.id, quantity)}
+                    selectedStore={selectedStore}
                   />
                 ))}
               </div>
@@ -264,72 +306,78 @@ function ProductCardView({
   product,
   cartQuantity,
   onSetCartQuantity,
+  selectedStore,
 }: {
   product: ProductCard;
   cartQuantity: number;
   onSetCartQuantity: (quantity: number) => void;
+  selectedStore: string;
 }) {
-  const cheapest = lowestPrice(product.offers);
+  const [expanded, setExpanded] = useState(false);
+  const visibleOffers = product.offers.filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore);
+  const cheapest = lowestPrice(visibleOffers);
   const meta = [product.brand, product.unit ? `${product.quantity ?? ""}${product.unit}`.replace(/^/, "") : null].filter(Boolean).join(" ");
 
   return (
-    <article className="flex flex-col rounded-3xl border border-line bg-card p-5 shadow-[0_12px_32px_rgba(28,25,21,0.04)]">
-      <div className="flex gap-4">
+    <article
+      onClick={() => setExpanded((current) => !current)}
+      className="cursor-pointer flex flex-col rounded-2xl border border-line bg-card p-3 shadow-[0_8px_24px_rgba(28,25,21,0.035)] transition sm:p-4"
+    >
+      <div className="flex items-start gap-3">
         {product.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={product.imageUrl} alt="" className="size-16 shrink-0 rounded-2xl object-cover" />
-        ) : null}
-        <div className="min-w-0">
-          <h3 className="text-xl leading-6 font-semibold tracking-tight">{product.name}</h3>
-          {meta ? <p className="mt-1 text-sm text-ink-soft">{meta}</p> : null}
+          <img src={product.imageUrl} alt="" className="size-14 shrink-0 rounded-xl object-cover sm:size-16" />
+        ) : (
+          <div className="size-14 shrink-0 rounded-xl bg-background sm:size-16" />
+        )}
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base leading-5 font-semibold tracking-tight sm:text-lg">{product.name}</h3>
+          {meta ? <p className="mt-1 text-xs text-ink-soft sm:text-sm">{meta}</p> : null}
         </div>
       </div>
 
-      {product.offers.length === 0 ? (
-        <p className="mt-5 rounded-2xl bg-background px-4 py-3 text-sm text-ink-soft">Šiam produktui kainų dar nėra.</p>
+      {visibleOffers.length === 0 ? (
+        <p className="mt-3 rounded-xl bg-background px-3 py-2 text-sm text-ink-soft">Pasirinktose parduotuvėse kainų nėra.</p>
       ) : (
-        <ul className="mt-5 divide-y divide-line border-t border-line">
-          {product.offers.map((offer, index) => {
+        <div className="mt-3 grid grid-cols-1 gap-1.5 border-t border-line pt-2">
+          {(expanded ? visibleOffers : visibleOffers.slice(0, 1)).map((offer, index) => {
             const current = effectivePrice(offer);
             const isCheapest = cheapest !== null && current === cheapest;
             const showPromo = offer.promoPrice !== null && (offer.regularPrice === null || offer.promoPrice !== offer.regularPrice);
             const perUnit = current === null ? null : unitPrice(current, product.quantity, product.unit);
 
             return (
-              <li key={`${offer.storeName}-${index}`} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div key={`${offer.storeName}-${index}`} className={`flex items-center justify-between gap-3 rounded-xl px-2.5 py-2 ${isCheapest ? "bg-forest/8" : "bg-background/70"}`}>
                 <div className="min-w-0">
-                  <p className="truncate font-semibold">{offer.storeName}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    {isCheapest ? <span className="rounded-full bg-forest/10 px-2 py-0.5 text-xs font-semibold text-forest">Pigiausia</span> : null}
-                    {offer.loyaltyOnly ? <LoyaltyBadge /> : null}
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold">{offer.storeName}</p>
+                    {isCheapest ? <span className="shrink-0 rounded-full bg-forest px-1.5 py-0.5 text-[10px] font-bold text-white">GERIAUSIA</span> : null}
                   </div>
+                  {offer.loyaltyOnly ? <div className="mt-1"><LoyaltyBadge /></div> : null}
                 </div>
-                <div className="flex flex-col items-start gap-0.5 sm:items-end">
-                  <div className="flex items-baseline gap-3">
+                <div className="shrink-0 text-right">
+                  <div className="flex items-baseline justify-end gap-2">
                     {offer.regularPrice !== null ? (
-                      <span className={`tabular-nums ${showPromo ? "text-sm text-ink-soft line-through" : "text-lg font-semibold"}`}>
+                      <span className={`tabular-nums ${showPromo ? "text-xs text-ink-soft line-through" : "text-base font-semibold"}`}>
                         {euro.format(offer.regularPrice)}
                       </span>
                     ) : null}
                     {showPromo && offer.promoPrice !== null ? (
-                      <span className="text-lg font-semibold text-sale tabular-nums">{euro.format(offer.promoPrice)}</span>
-                    ) : null}
-                    {offer.regularPrice === null && offer.promoPrice === null ? (
-                      <span className="text-sm text-ink-soft">Kaina nepateikta</span>
+                      <span className="text-base font-bold text-sale tabular-nums">{euro.format(offer.promoPrice)}</span>
                     ) : null}
                   </div>
                   {perUnit ? (
-                    <span className="text-xs text-ink-soft tabular-nums">
+                    <span className="block text-[11px] text-ink-soft tabular-nums">
                       {euro.format(perUnit.value)} / {perUnit.label}
                     </span>
                   ) : null}
                 </div>
-              </li>
+              </div>
             );
           })}
-        </ul>
+        </div>
       )}
-      <div className="mt-auto pt-4">
+      <div className="mt-3 sm:mt-auto sm:pt-1" onClick={(event) => event.stopPropagation()}>
         {cartQuantity === 0 ? (
           <button
             type="button"
@@ -355,11 +403,19 @@ function CartPanel({
   allProducts,
   onClose,
   onSetQuantity,
+  pickedIds,
+  onTogglePicked,
+  onClear,
+  selectedStore,
 }: {
   cart: CartItem[];
   allProducts: ProductCard[];
   onClose: () => void;
   onSetQuantity: (productId: string, quantity: number) => void;
+  pickedIds: string[];
+  onTogglePicked: (productId: string) => void;
+  onClear: () => void;
+  selectedStore: string;
 }) {
   const cartProducts = cart.flatMap((item) => {
     const product = allProducts.find((candidate) => candidate.id === item.productId);
@@ -367,6 +423,7 @@ function CartPanel({
   });
 
   const storeNames = [...new Set(allProducts.flatMap((product) => product.offers.map((offer) => offer.storeName)))]
+    .filter((storeName) => selectedStore === "Visos" || storeName === selectedStore)
     .sort((a, b) => a.localeCompare(b, "lt"));
 
   const comparisons = storeNames.map((storeName) => {
@@ -388,6 +445,22 @@ function CartPanel({
     ? Math.min(...availableComparisons.map((comparison) => comparison.total))
     : null;
 
+  const mixedBasketTotal = cartProducts.reduce((total, { product, quantity }) => {
+    const prices = product.offers
+      .filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore)
+      .map((offer) => effectivePrice(offer))
+      .filter((price): price is number => price !== null);
+    return prices.length > 0 ? total + Math.min(...prices) * quantity : total;
+  }, 0);
+
+  const mixedBasketMissing = cartProducts.filter(({ product }) =>
+    product.offers
+      .filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore)
+      .every((offer) => effectivePrice(offer) === null)
+  );
+
+  const savings = cheapestTotal !== null ? cheapestTotal - mixedBasketTotal : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-end bg-foreground/35 backdrop-blur-[2px] sm:p-4" role="dialog" aria-modal="true" aria-label="Pirkinių krepšelis">
       <button type="button" className="absolute inset-0 cursor-default" onClick={onClose} aria-label="Uždaryti krepšelį" />
@@ -396,6 +469,9 @@ function CartPanel({
           <div>
             <p className="text-xs font-semibold tracking-[0.14em] text-forest uppercase">Pirkinių krepšelis</p>
             <h2 className="mt-1 font-display text-3xl tracking-tight">Jūsų krepšelis</h2>
+            {cartProducts.length > 0 ? (
+              <p className="mt-1 text-sm font-semibold text-forest">Paimta: {pickedIds.length} iš {cartProducts.length}</p>
+            ) : null}
           </div>
           <button type="button" onClick={onClose} className="flex size-10 items-center justify-center rounded-full border border-line text-xl text-ink-soft" aria-label="Uždaryti krepšelį">×</button>
         </header>
@@ -408,17 +484,23 @@ function CartPanel({
             </div>
           ) : (
             <>
+              <div className="flex justify-end">
+                <button type="button" onClick={onClear} className="rounded-xl border border-sale/20 px-3 py-2 text-sm font-semibold text-sale">Išvalyti krepšelį</button>
+              </div>
               <div className="flex flex-col gap-3">
-                {cartProducts.map(({ product, quantity }) => (
-                  <article key={product.id} className="flex items-center gap-3 rounded-2xl border border-line p-3">
+                {cartProducts.map(({ product, quantity }) => {
+                  const picked = pickedIds.includes(product.id);
+                  return (
+                  <article key={product.id} className={`flex items-center gap-3 rounded-2xl border p-3 transition ${picked ? "border-forest/20 bg-foreground/5 opacity-60" : "border-line"}`}>
+                    <button type="button" role="checkbox" aria-checked={picked} onClick={() => onTogglePicked(product.id)} className={`flex size-7 shrink-0 items-center justify-center rounded-lg border text-sm font-bold ${picked ? "border-forest bg-forest text-white" : "border-line bg-card text-transparent"}`} aria-label={picked ? `Atžymėti ${product.name}` : `Pažymėti ${product.name}`}>✓</button>
                     {product.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={product.imageUrl} alt="" className="size-14 shrink-0 rounded-xl object-cover" />
+                      <img src={product.imageUrl} alt="" className={`size-14 shrink-0 rounded-xl object-cover ${picked ? "grayscale" : ""}`} />
                     ) : (
                       <div className="size-14 shrink-0 rounded-xl bg-background" />
                     )}
                     <div className="min-w-0 flex-1">
-                      <h3 className="truncate font-semibold">{product.name}</h3>
+                      <h3 className={`truncate font-semibold ${picked ? "line-through" : ""}`}>{product.name}</h3>
                       {product.brand ? <p className="mt-0.5 text-xs text-ink-soft">{product.brand}</p> : null}
                       <div className="mt-2 flex items-center gap-2">
                         <button type="button" onClick={() => onSetQuantity(product.id, quantity - 1)} className="flex size-8 items-center justify-center rounded-lg border border-line text-lg font-semibold" aria-label={`Sumažinti ${product.name} kiekį`}>−</button>
@@ -428,7 +510,8 @@ function CartPanel({
                       </div>
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="flex flex-col gap-3">
@@ -458,6 +541,30 @@ function CartPanel({
                     </article>
                   );
                 })}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <h3 className="font-display text-2xl tracking-tight">Parduotuvių palyginimo santrauka</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <article className="rounded-2xl border border-forest/20 bg-forest/5 p-4">
+                    <p className="text-xs font-semibold tracking-[0.12em] text-forest uppercase">Pigiausias mišrus krepšelis</p>
+                    <strong className="mt-1 block text-2xl text-forest tabular-nums">{euro.format(mixedBasketTotal)}</strong>
+                    {mixedBasketMissing.length > 0 ? (
+                      <p className="mt-1 text-xs text-sale">Trūksta {mixedBasketMissing.length} {mixedBasketMissing.length === 1 ? "prekės" : "prekių"}</p>
+                    ) : (
+                      <p className="mt-1 text-xs font-semibold text-forest">Visos prekės pasiekiamos įvairiose parduotuvėse</p>
+                    )}
+                  </article>
+                  <article className="rounded-2xl border border-line bg-background p-4">
+                    <p className="text-xs font-semibold tracking-[0.12em] text-ink-soft uppercase">Sutaupoma</p>
+                    {savings !== null && savings > 0 ? (
+                      <strong className="mt-1 block text-2xl text-sale tabular-nums">{euro.format(savings)}</strong>
+                    ) : (
+                      <strong className="mt-1 block text-2xl text-ink-soft tabular-nums">0,00 €</strong>
+                    )}
+                    <p className="mt-1 text-xs text-ink-soft">Lyginant su viena pigiausia parduotuve</p>
+                  </article>
+                </div>
               </div>
             </>
           )}
