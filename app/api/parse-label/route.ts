@@ -97,23 +97,37 @@ Kiekvienam elementui:
 
 Jei nuotraukoje yra viena etiketė, items turi turėti vieną elementą. Jei yra kelių prekių leidinys, items turi apimti visas aiškiai matomas kainas. Jei kainos tiksliai neįskaitomos, quantity ir kainas nustatyk į 0 arba null.`;
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const geminiResponse = await fetch(endpoint, {
+  const requestBody = {
+    contents: [{
+      role: "user",
+      parts: [
+        { text: prompt },
+        { inlineData: { mimeType, data: base64 } },
+      ],
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
+  };
+
+  const primaryEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  let geminiResponse = await fetch(primaryEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType, data: base64 } },
-        ],
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
-    }),
+    body: JSON.stringify(requestBody),
   });
+
+  if (geminiResponse.status === 503 || geminiResponse.status === 429) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(apiKey)}`;
+    geminiResponse = await fetch(fallbackEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+  }
 
   if (!geminiResponse.ok) {
     const detail = await geminiResponse.text();
