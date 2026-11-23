@@ -43,12 +43,14 @@ export async function POST(request: Request) {
   let base64 = "";
   let mimeType = "image/jpeg";
   let storeName = "";
+  let validUntil = "";
 
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("multipart/form-data")) {
     const formData = await request.formData();
     const file = formData.get("image");
     storeName = typeof formData.get("storeName") === "string" ? String(formData.get("storeName")) : "";
+    validUntil = typeof formData.get("validUntil") === "string" ? String(formData.get("validUntil")) : "";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ message: "Nuotrauka nepateikta" }, { status: 400 });
@@ -72,6 +74,7 @@ export async function POST(request: Request) {
     base64 = typeof body.imageBase64 === "string" ? body.imageBase64 : "";
     if (typeof body.mimeType === "string" && body.mimeType.trim()) mimeType = body.mimeType.trim();
     storeName = typeof body.storeName === "string" ? body.storeName : "";
+    validUntil = typeof body.validUntil === "string" ? body.validUntil : "";
   }
 
   base64 = base64.replace(/^data:[^;]+;base64,/, "").replace(/\s/g, "");

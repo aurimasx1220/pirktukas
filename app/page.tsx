@@ -44,15 +44,14 @@ function SiteHeader() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-7 sm:px-8 sm:py-9">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold tracking-[0.18em] text-forest uppercase">Maisto kainos</p>
-            <h1 className="mt-2 font-display text-5xl tracking-tight text-forest sm:text-6xl">Pirktukas</h1>
+            <h1 className="font-display text-5xl tracking-tight text-forest sm:text-6xl">Pirktukas</h1>
           </div>
           <span className="mt-2 rounded-full border border-line px-3 py-1 text-xs font-semibold tracking-wide text-ink-soft uppercase">
             MVP
           </span>
         </div>
         <p className="max-w-2xl text-lg leading-7 text-ink-soft sm:text-xl">
-          Išmanus maisto kainų palyginimas Lietuvoje
+          Išmanus kainų palyginimo asistentas
         </p>
         <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-ink-soft">
           <div className="flex items-center gap-2">
@@ -65,26 +64,9 @@ function SiteHeader() {
             <dt className="sr-only">Akcijos kaina</dt>
             <dd>Akcijos kaina</dd>
           </div>
-          <div className="flex items-center gap-2">
-            <LoyaltyBadge />
-            <dt className="sr-only">Lojalumo kortelė</dt>
-            <dd>Galioja tik su kortele</dd>
-          </div>
         </dl>
       </div>
     </header>
-  );
-}
-
-function LoyaltyBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-[#1e3a5f]/20 bg-[#1e3a5f]/8 px-2 py-0.5 text-xs font-semibold text-[#1e3a5f]">
-      <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3.5">
-        <rect x="1.5" y="3.5" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M1.5 6.5h13" stroke="currentColor" strokeWidth="1.4" />
-      </svg>
-      Su kortele
-    </span>
   );
 }
 

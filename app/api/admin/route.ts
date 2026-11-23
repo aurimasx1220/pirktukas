@@ -94,6 +94,7 @@ export async function POST(request: Request) {
 
       const promo = numberValue(store.promo);
       const priceType = typeof store.priceType === "string" ? store.priceType : "regular";
+      const validUntil = typeof store.validUntil === "string" ? store.validUntil : null;
 
       const storeProduct = await supabase.from("store_products").insert({
         product_id: productId,
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
         promo_price: promo,
         price_type: priceType,
         loyalty_only: priceType === "loyalty_card",
+        valid_until: validUntil,
       });
 
       if (price.error) {
@@ -129,6 +131,7 @@ export async function POST(request: Request) {
     const regular = numberValue(body.regular);
     const promo = numberValue(body.promo);
     const priceType = typeof body.priceType === "string" ? body.priceType : "regular";
+    const validUntil = typeof body.validUntil === "string" ? body.validUntil : null;
     const priceId = typeof body.priceId === "string" ? body.priceId : null;
 
     if (!productId || !storeId || regular === null || regular < 0) {
@@ -173,6 +176,7 @@ export async function POST(request: Request) {
       promo_price: promo,
       price_type: priceType,
       loyalty_only: priceType === "loyalty_card",
+      valid_until: validUntil,
     };
 
     const result = priceId

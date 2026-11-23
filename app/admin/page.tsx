@@ -99,6 +99,7 @@ export default function AdminPage() {
   const [adminPassword, setAdminPassword] = useState("");
   const [labelStoreName, setLabelStoreName] = useState("");
   const [scanningLabel, setScanningLabel] = useState(false);
+  const [validUntil, setValidUntil] = useState("");
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
   const [authenticated, setAuthenticated] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -360,6 +361,7 @@ export default function AdminPage() {
     const formData = new FormData();
     formData.append("image", file);
     formData.append("storeName", labelStoreName);
+    if (validUntil) formData.append("validUntil", validUntil);
 
     const response = await fetch("/api/parse-label", {
       method: "POST",
@@ -555,7 +557,7 @@ export default function AdminPage() {
             </select>
           </label>
           <label className="flex h-12 cursor-pointer items-center justify-center rounded-xl border border-forest/20 bg-forest/5 px-4 text-sm font-semibold text-forest">
-            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={scanningLabel} onChange={(event) => void scanLabel(event.target.files?.[0] ?? null)} />
+            <input type="file" accept="image/*,application/pdf" className="hidden" disabled={scanningLabel} onChange={(event) => void scanLabel(event.target.files?.[0] ?? null)} />
             {scanningLabel ? "Nuskaitoma..." : "Pasirinkti nuotrauką / fotografuoti"}
           </label>
         </div>

@@ -72,7 +72,7 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
   const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [cartLoaded, setCartLoaded] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
-  const [selectedStore, setSelectedStore] = useState("Visos");
+  const [selectedStores, setSelectedStores] = useState<string[]>([]);
   const allProductsForStores = useMemo(
     () => catalog.sections.flatMap((section) => section.products),
     [catalog.sections],
@@ -82,9 +82,12 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
   useEffect(() => {
     try {
       const savedStore = window.localStorage.getItem(STORE_FILTER_STORAGE_KEY);
-      if (savedStore && ["Visos", "Lidl", "Norfa", "Maxima", "Rimi", "IKI"].includes(savedStore)) {
-        if (savedStore === "Visos" || allProductsForStores.some((product) => product.offers.some((offer) => offer.storeName === savedStore))) {
-          setSelectedStore(savedStore);
+      if (savedStore) {
+        try {
+          const parsed = JSON.parse(savedStore);
+          if (Array.isArray(parsed)) setSelectedStores(parsed.filter((store): store is string => typeof store === "string"));
+        } catch {
+          setSelectedStores(savedStore === "Visos" ? [] : [savedStore]);
         }
       }
 
@@ -112,11 +115,11 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
 
   useEffect(() => {
     if (cartLoaded) {
-      window.localStorage.setItem(STORE_FILTER_STORAGE_KEY, selectedStore);
+      window.localStorage.setItem(STORE_FILTER_STORAGE_KEY, JSON.stringify(selectedStores));
       window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
       window.localStorage.setItem(CHECKED_STORAGE_KEY, JSON.stringify(pickedIds.filter((id) => cart.some((item) => item.productId === id))));
     }
-  }, [cart, pickedIds, cartLoaded, selectedStore]);
+  }, [cart, pickedIds, cartLoaded, selectedStores]);
 
   const visibleSections = useMemo(() => {
     const search = normalizeText(query.trim());
@@ -176,7 +179,7 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
           pickedIds={pickedIds}
           onTogglePicked={(productId) => setPickedIds((current) => current.includes(productId) ? current.filter((id) => id !== productId) : [...current, productId])}
           onClear={() => { setCart([]); setPickedIds([]); }}
-          selectedStore={selectedStore}
+          selectedStores={selectedStores}
         />
       ) : null}
       <div className="rounded-3xl border border-line bg-card p-4 shadow-[0_12px_32px_rgba(28,25,21,0.04)] sm:p-5">
@@ -212,11 +215,12 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
         </div>
 
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1" aria-label="Parduotuvės filtras">
-          {storeOptions.map((storeName) => (
+          <CategoryButton active={selectedStores.length === 0} onClick={() => setSelectedStores([])} label="Visos" />
+          {storeOptions.filter((storeName) => storeName !== "Visos").map((storeName) => (
             <CategoryButton
               key={storeName}
-              active={selectedStore === storeName}
-              onClick={() => setSelectedStore(storeName)}
+              active={selectedStores.includes(storeName)}
+              onClick={() => setSelectedStores((current) => current.includes(storeName) ? current.filter((id) => id !== storeName) : [...current, storeName])}
               label={storeName}
             />
           ))}
@@ -264,7 +268,7 @@ export function CatalogView({ catalog }: { catalog: Catalog }) {
                     product={product}
                     cartQuantity={cart.find((item) => item.productId === product.id)?.quantity ?? 0}
                     onSetCartQuantity={(quantity) => setCartQuantity(product.id, quantity)}
-                    selectedStore={selectedStore}
+                    selectedStores={selectedStores}
                   />
                 ))}
               </div>
@@ -306,15 +310,15 @@ function ProductCardView({
   product,
   cartQuantity,
   onSetCartQuantity,
-  selectedStore,
+  selectedStores,
 }: {
   product: ProductCard;
   cartQuantity: number;
   onSetCartQuantity: (quantity: number) => void;
-  selectedStore: string;
+  selectedStores: string[];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const visibleOffers = product.offers.filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore);
+  const visibleOffers = product.offers.filter((offer) => selectedStores.length === 0 || selectedStores.includes(offer.storeName));
   const cheapest = lowestPrice(visibleOffers);
   const meta = [product.brand, product.unit ? `${product.quantity ?? ""}${product.unit}`.replace(/^/, "") : null].filter(Boolean).join(" ");
 
@@ -389,7 +393,7 @@ function ProductCardView({
         ) : (
           <div className="flex h-11 items-center justify-between rounded-xl border border-forest/25 bg-forest/5 px-2">
             <button type="button" onClick={() => onSetCartQuantity(cartQuantity - 1)} className="flex size-9 items-center justify-center rounded-lg text-xl font-semibold text-forest hover:bg-forest/10" aria-label={`Sumažinti ${product.name} kiekį`}>−</button>
-            <span className="font-semibold tabular-nums" aria-label="Krepšelio kiekis">{cartQuantity}</span>
+            <span className="font-semibold tabular-nums" aria-label="Krepšio kiekis">{cartQuantity}</span>
             <button type="button" onClick={() => onSetCartQuantity(cartQuantity + 1)} className="flex size-9 items-center justify-center rounded-lg text-xl font-semibold text-forest hover:bg-forest/10" aria-label={`Padidinti ${product.name} kiekį`}>+</button>
           </div>
         )}
@@ -406,7 +410,7 @@ function CartPanel({
   pickedIds,
   onTogglePicked,
   onClear,
-  selectedStore,
+  selectedStores,
 }: {
   cart: CartItem[];
   allProducts: ProductCard[];
@@ -415,7 +419,7 @@ function CartPanel({
   pickedIds: string[];
   onTogglePicked: (productId: string) => void;
   onClear: () => void;
-  selectedStore: string;
+  selectedStores: string[];
 }) {
   const cartProducts = cart.flatMap((item) => {
     const product = allProducts.find((candidate) => candidate.id === item.productId);
@@ -423,7 +427,7 @@ function CartPanel({
   });
 
   const storeNames = [...new Set(allProducts.flatMap((product) => product.offers.map((offer) => offer.storeName)))]
-    .filter((storeName) => selectedStore === "Visos" || storeName === selectedStore)
+    .filter((storeName) => selectedStores.includes(storeName))
     .sort((a, b) => a.localeCompare(b, "lt"));
 
   const comparisons = storeNames.map((storeName) => {
@@ -447,7 +451,7 @@ function CartPanel({
 
   const mixedBasketTotal = cartProducts.reduce((total, { product, quantity }) => {
     const prices = product.offers
-      .filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore)
+      .filter((offer) => selectedStores.includes(offer.storeName))
       .map((offer) => effectivePrice(offer))
       .filter((price): price is number => price !== null);
     return prices.length > 0 ? total + Math.min(...prices) * quantity : total;
@@ -455,7 +459,7 @@ function CartPanel({
 
   const mixedBasketMissing = cartProducts.filter(({ product }) =>
     product.offers
-      .filter((offer) => selectedStore === "Visos" || offer.storeName === selectedStore)
+      .filter((offer) => selectedStores.includes(offer.storeName))
       .every((offer) => effectivePrice(offer) === null)
   );
 

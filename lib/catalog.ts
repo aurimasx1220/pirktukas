@@ -5,6 +5,7 @@ export type StoreOffer = {
   regularPrice: number | null;
   promoPrice: number | null;
   loyaltyOnly: boolean;
+  validUntil: string | null;
 };
 
 export type ProductCard = {
@@ -162,6 +163,7 @@ export async function loadCatalog(): Promise<CatalogResult> {
       regularPrice: price ? numberValue(price.regular_price) : null,
       promoPrice: price ? numberValue(price.promo_price) : null,
       loyaltyOnly: price ? flag(price.loyalty_only) : false,
+      validUntil: price ? text(price, "valid_until") : null,
     };
 
     const offers = offersByProduct.get(productId) ?? [];
@@ -249,6 +251,14 @@ export async function loadCatalog(): Promise<CatalogResult> {
 }
 
 export function effectivePrice(offer: StoreOffer) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (offer.validUntil) {
+    const validUntil = new Date(`${offer.validUntil}T00:00:00`);
+    if (!Number.isNaN(validUntil.getTime()) && validUntil < today) {
+      return offer.regularPrice;
+    }
+  }
   if (offer.promoPrice !== null && offer.promoPrice >= 0) return offer.promoPrice;
   if (offer.regularPrice !== null && offer.regularPrice >= 0) return offer.regularPrice;
   return null;
